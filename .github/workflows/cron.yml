@@ -16,10 +16,8 @@ jobs:
         with:
           node-version: "18"
       - name: Install deps
-        working-directory: fund-daily-bot
         run: npm install
       - name: Run
-        working-directory: fund-daily-bot
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
