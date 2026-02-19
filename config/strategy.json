@@ -1,0 +1,10 @@
+{
+  "minDays": 60,
+  "trendLookback": 20,
+  "riskMddHigh": 0.2,
+  "valuationLow": -0.8,
+  "valuationHigh": 0.8,
+  "cooldownDays": 5,
+  "maxPositionAdd": 0.2,
+  "maxPositionReduce": 0.2
+}

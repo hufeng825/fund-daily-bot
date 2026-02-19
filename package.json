@@ -1,0 +1,12 @@
+{
+  "name": "fund-daily-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "run": "node ./src/index.js"
+  },
+  "dependencies": {
+    "nodemailer": "^6.9.13"
+  }
+}
