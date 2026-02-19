@@ -86,10 +86,6 @@ const main = async () => {
     await jitter(200, 800);
     const gz = await fetchGszWithRetry(f.code, 2);
     const name = gz?.name || f.name || f.code;
-    if (!isTradingDay(gz)) {
-      return { ...f, name, skip: true, reason: '非交易日或估值未更新', gz };
-    }
-
     let history = loadCache(f.code);
     if (!history) {
       history = await fetchHistory(f.code, 360);
@@ -113,19 +109,30 @@ const main = async () => {
       }
     }
 
-    const gsz = gz?.gsz ? Number(gz.gsz) : null;
     const dwjz = gz?.dwjz ? Number(gz.dwjz) : null;
-    const engine = buildStrategy({
-      history,
-      gsz,
-      dwjz,
-      name,
-      code: f.code,
-      profile,
-      indexHistory
-    });
+    const gszRaw = gz?.gsz ? Number(gz.gsz) : null;
+    const isToday = isTradingDay(gz);
+    // If no intraday update, fall back to yesterday's NAV as estimate
+    const gsz = Number.isFinite(gszRaw) ? gszRaw : Number.isFinite(dwjz) ? dwjz : null;
+    if (!Number.isFinite(gsz) || !Number.isFinite(dwjz)) {
+      return { ...f, name, skip: true, reason: '估值数据缺失', gz };
+    }
+    let engine = null;
+    try {
+      engine = buildStrategy({
+        history,
+        gsz,
+        dwjz,
+        name,
+        code: f.code,
+        profile,
+        indexHistory
+      });
+    } catch (err) {
+      return { ...f, name, gz, gsz, dwjz, history, profile, indexHistory, skip: true, reason: `策略计算失败: ${err?.message || 'unknown'}` };
+    }
 
-    return { ...f, name, gz, gsz, dwjz, history, profile, indexHistory, engine };
+    return { ...f, name, gz, gsz, dwjz, history, profile, indexHistory, engine, isToday };
   });
 
   for (const r of results) {
@@ -143,7 +150,8 @@ const main = async () => {
     const action = f.engine?.executionPlan?.action || '观望';
     if (action !== '观望') traded = true;
     const reasons = (f.engine?.executionPlan?.reasons || []).slice(0, 3).join('；') || '—';
-    lines.push(`${f.name} (#${f.code}) | 盘中估值: ${f.gsz ?? '—'} | 昨日净值: ${f.dwjz ?? '—'} | 预估涨跌: ${diffText} | 策略: ${action}（${reasons}）`);
+    const note = f.isToday ? '' : ' | 估值未更新，使用昨日净值估算';
+    lines.push(`${f.name} (#${f.code}) | 盘中估值: ${f.gsz ?? '—'} | 昨日净值: ${f.dwjz ?? '—'} | 预估涨跌: ${diffText} | 策略: ${action}（${reasons}）${note}`);
   }
 
   const subject = `${tzToday} 14:30 基金盘中策略（${traded ? '有操作' : '观望'}）`;
