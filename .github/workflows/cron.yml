@@ -1,0 +1,30 @@
+name: Fund Daily Strategy
+
+on:
+  schedule:
+    - cron: "30 6 * * 1-5" # 14:30 Asia/Shanghai (UTC+8)
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+      - name: Install deps
+        working-directory: fund-daily-bot
+        run: npm install
+      - name: Run
+        working-directory: fund-daily-bot
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: npm run run
