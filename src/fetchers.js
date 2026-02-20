@@ -77,3 +77,26 @@ export const fetchHistory = async (code, days = 200) => {
   const html = await fetchText(url);
   return parseTable(html);
 };
+
+export const fetchHistoryDeep = async (code, targetDays = 720, maxPages = 12) => {
+  const per = 200;
+  const all = [];
+  for (let page = 1; page <= maxPages; page += 1) {
+    await jitter(120, 260);
+    const url = `https://fundf10.eastmoney.com/F10DataApi.aspx?type=lsjz&code=${code}&page=${page}&per=${per}&sdate=&edate=`;
+    const html = await fetchText(url);
+    const batch = parseTable(html);
+    if (!batch.length) break;
+    all.push(...batch);
+    if (all.length >= targetDays) break;
+  }
+  // de-dup by date and sort asc
+  const map = new Map();
+  all.forEach((it) => {
+    if (it?.date && Number.isFinite(it.value)) map.set(it.date, it.value);
+  });
+  const list = Array.from(map.entries())
+    .map(([date, value]) => ({ date, value }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  return list;
+};

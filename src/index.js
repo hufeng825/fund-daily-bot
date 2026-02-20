@@ -2,11 +2,12 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
-import { fetchGszWithRetry, fetchHistory, fetchFundProfileLite } from './fetchers.js';
+import { fetchGszWithRetry, fetchHistory, fetchFundProfileLite, fetchHistoryDeep } from './fetchers.js';
 import { runWithConcurrency, chunk, jitter, todayISO } from './utils.js';
 import { buildStrategy } from './engine/strategyEngine.js';
 import { getIndexSecidByFund, getFallbackQdiiIndex } from './engine/indexMap.js';
 import { fetchIndexHistory } from './engine/indexFetcher.js';
+import { detectFundType, mapFundTypeToCategory } from './engine/fundType.js';
 
 const ROOT = path.resolve(process.cwd());
 const cfgPath = path.join(ROOT, 'config', 'funds.json');
@@ -113,6 +114,16 @@ const main = async () => {
     } catch {
       profile = null;
     }
+    const fundTypeConf = detectFundType({ fundName: name, fundCode: f.code });
+    const fundCategory = mapFundTypeToCategory(fundTypeConf?.type_key);
+    const targetDays = fundCategory === 'money' ? 300 : fundCategory === 'bond' ? 600 : fundCategory === 'qdii' ? 1500 : 1800;
+    if (history.length < Math.min(300, Math.floor(targetDays * 0.4))) {
+      try {
+        history = await fetchHistoryDeep(f.code, targetDays, 12);
+        saveCache(f.code, history);
+      } catch { }
+    }
+
     const indexSecid = getIndexSecidByFund(name, profile?.type, profile?.benchmark)
       || getFallbackQdiiIndex(name, profile?.type, profile?.benchmark);
     let indexHistory = [];
