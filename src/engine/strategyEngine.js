@@ -220,6 +220,10 @@ export const buildStrategy = ({ history, gsz, dwjz, name = '', code = '', indexH
       : decision?.stance === '谨慎' || valuationExplain.level === 'bad' ? '减仓'
       : '观望');
     const reasons = [];
+    if (longHistory.length < INDICATOR_CONFIG.minSignalDays) {
+      action = '观望';
+      reasons.push('历史样本不足，强制观望');
+    }
     if (decision?.groupBias) reasons.push(`组回测倾向：${decision.groupBias}`);
     if (bestSignal?.name && Number.isFinite(bestSignal.winRate)) {
       reasons.push(`回测最优：${bestSignal.name}（胜率 ${(bestSignal.winRate * 100).toFixed(1)}% / 样本 ${bestSignal.sample || 0}）`);
@@ -229,15 +233,25 @@ export const buildStrategy = ({ history, gsz, dwjz, name = '', code = '', indexH
     if (Number.isFinite(premium)) reasons.push(`溢价：${(premium * 100).toFixed(2)}%`);
     if (Number.isFinite(perfStats.mdd)) reasons.push(`回撤：${(perfStats.mdd * 100).toFixed(2)}%`);
     if (metrics.lastRsi) reasons.push(`RSI：${metrics.lastRsi.toFixed(0)}`);
-    if (Number.isFinite(perfStats.mdd) && perfStats.mdd >= riskHigh) {
-      action = '减仓';
-      reasons.push(`风控：回撤≥${(riskHigh * 100).toFixed(0)}%`);
-    }
-    if (Number.isFinite(premium) && premium > premiumGate && valuationExplain.level !== 'good') {
-      action = action === '加仓' ? '观望' : '减仓';
-      reasons.push(`溢价门槛：>${(premiumGate * 100).toFixed(2)}%`);
-    }
-    return { action, reasons };
+    const driver = Number.isFinite(perfStats.mdd) && perfStats.mdd >= riskHigh
+      ? '风险'
+      : valuationExplain.level === 'bad' || valuationExplain.level === 'good'
+        ? '估值'
+        : Number.isFinite(perfStats.mdd) && perfStats.mdd >= riskHigh * 0.7
+          ? '回撤'
+          : metrics.trendScore >= 70 || metrics.trendScore <= 40
+            ? '趋势'
+            : '情绪';
+    const trigger = `${valuationExplain.label} / ${decision?.trend || '趋势中性'} / ${decision?.oversold || '中性'}`;
+    const returns = metricHistory.slice(1).map((v, i) => {
+      const prev = metricHistory[i]?.value;
+      if (!Number.isFinite(prev) || !Number.isFinite(v?.value)) return null;
+      return (v.value - prev) / prev;
+    }).filter((v) => Number.isFinite(v));
+    const avgAbsRet = returns.length ? (returns.reduce((a, b) => a + Math.abs(b), 0) / returns.length) : 0.002;
+    const minWaitDays = Math.max(2, Math.min(15, Math.ceil(0.02 / Math.max(avgAbsRet, 0.002))));
+    const positionRange = action === '加仓' ? '40%-60%' : action === '减仓' ? '20%-40%' : '30%-50%';
+    return { action, reasons, driver, trigger, minWaitDays, positionRange };
   })();
 
   const values = metricHistory.map((it) => it.value).filter((v) => Number.isFinite(v));
