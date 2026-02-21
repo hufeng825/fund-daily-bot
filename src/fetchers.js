@@ -52,7 +52,8 @@ export const fetchFundProfileLite = async (code) => {
   };
   const type = pick('基金类型') || pick('基金类型/运作方式');
   const benchmark = pick('业绩比较基准');
-  return { type, benchmark };
+  const establish = pick('成立日期') || pick('成立时间');
+  return { type, benchmark, establish };
 };
 
 export const fetchGszWithRetry = async (code, retries = 2) => {
@@ -78,7 +79,7 @@ export const fetchHistory = async (code, days = 200) => {
   return parseTable(html);
 };
 
-export const fetchHistoryDeep = async (code, targetDays = 720, maxPages = 12) => {
+export const fetchHistoryDeep = async (code, targetDays = 720, maxPages = 12, establishDate = '') => {
   const per = 200;
   const all = [];
   for (let page = 1; page <= maxPages; page += 1) {
@@ -89,6 +90,8 @@ export const fetchHistoryDeep = async (code, targetDays = 720, maxPages = 12) =>
     if (!batch.length) break;
     all.push(...batch);
     if (all.length >= targetDays) break;
+    const earliest = batch[0]?.date || '';
+    if (establishDate && earliest && earliest <= establishDate) break;
   }
   // de-dup by date and sort asc
   const map = new Map();

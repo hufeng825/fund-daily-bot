@@ -182,6 +182,7 @@ const main = async () => {
     const reasons = (f.engine?.executionPlan?.reasons || []).slice(0, 2).join('；') || '—';
     const note = f.isToday ? '' : ' | 估值未更新，使用昨日净值估算';
     const line = `${f.name} (#${f.code}) | 估值: ${f.gsz ?? '—'} | 昨日净值: ${f.dwjz ?? '—'} | 涨跌: ${diffText} | 策略: ${action}（${reasons}）${note}`;
+    const premium = Number.isFinite(f.engine?.premium) ? f.engine.premium : null;
     const check = {
       action,
       groupBias: f.engine?.decision?.groupBias || '—',
@@ -190,7 +191,8 @@ const main = async () => {
       driver: f.engine?.executionPlan?.driver || '—',
       trigger: f.engine?.executionPlan?.trigger || '—',
       minWait: f.engine?.executionPlan?.minWaitDays ? `${f.engine.executionPlan.minWaitDays}天` : '—',
-      position: f.engine?.executionPlan?.positionRange || '—'
+      position: f.engine?.executionPlan?.positionRange || '—',
+      consistency: Number.isFinite(premium) ? (Math.abs(premium) > 0.03 ? '差' : Math.abs(premium) > 0.015 ? '中' : '好') : '—'
     };
     const riskValue = Number.isFinite(f.engine?.perfStats?.mdd) ? f.engine.perfStats.mdd : (Number.isFinite(f.engine?.metrics?.riskScore) ? f.engine.metrics.riskScore : null);
     let category = 'hold';
@@ -210,6 +212,9 @@ const main = async () => {
     });
     const estimatedCount = batches[i].filter((it) => it.isToday === false && it.category !== 'skip').length;
     const estimatedRatio = batches[i].length ? `${Math.round((estimatedCount / batches[i].length) * 100)}%` : '0%';
+    const highRiskCount = batches[i].filter((it) => Number.isFinite(it.riskValue) && it.riskValue >= 0.2).length;
+    const highValCount = batches[i].filter((it) => it.check?.valuationLevel === 'bad').length;
+    const badConsistencyCount = batches[i].filter((it) => it.check?.consistency === '差').length;
     const hasAction = group.buy.length + group.sell.length > 0;
     let holdList = group.hold;
     if (hasAction) {
@@ -221,6 +226,7 @@ const main = async () => {
       `窗口：14:30 盘中估值`,
       `批次：${i + 1}/${batches.length}`,
       `统计：加仓 ${group.buy.length}｜减仓/防守 ${group.sell.length}｜观望 ${group.hold.length}｜异常 ${group.skip.length}`,
+      `风险聚焦：高回撤 ${highRiskCount}｜估值偏高 ${highValCount}｜一致性差 ${badConsistencyCount}`,
       `估算比例：${estimatedCount}/${batches[i].length}（${estimatedRatio}）`,
       `策略版本：${strategyHash}`,
       ''
@@ -245,7 +251,7 @@ const main = async () => {
     const row = (it) => {
       const actionColor = it.category === 'buy' ? '#16a34a' : it.category === 'sell' ? '#dc2626' : it.category === 'hold' ? '#64748b' : '#f97316';
       const diffColor = String(it.diffText || '').startsWith('-') ? '#dc2626' : '#16a34a';
-      const checkText = `校验：action=${it.check?.action || '—'}｜bias=${it.check?.groupBias || '—'}｜stance=${it.check?.stance || '—'}｜val=${it.check?.valuationLevel || '—'}`;
+      const checkText = `校验：action=${it.check?.action || '—'}｜bias=${it.check?.groupBias || '—'}｜stance=${it.check?.stance || '—'}｜val=${it.check?.valuationLevel || '—'}｜一致性=${it.check?.consistency || '—'}`;
       const planText = `执行：仓位 ${it.check?.position || '—'}｜触发 ${it.check?.trigger || '—'}｜等待 ${it.check?.minWait || '—'}｜主导 ${it.check?.driver || '—'}`;
       return `<div style="padding:6px 0;border-bottom:1px dashed #e5e7eb;">
         <div style="font-weight:600;">${escapeHtml(it.text.split('|')[0] || '')}</div>
@@ -272,7 +278,7 @@ const main = async () => {
           <div style="color:${diffColor};font-weight:700;">${escapeHtml(it.diffText || '—')}</div>
           <div>${actionPill(escapeHtml(it.action || '观望'), actionColor)}</div>
           <div style="font-size:12px;color:#64748b;">
-            仓位 ${escapeHtml(it.check?.position || '—')}｜等待 ${escapeHtml(it.check?.minWait || '—')}
+            仓位 ${escapeHtml(it.check?.position || '—')}｜等待 ${escapeHtml(it.check?.minWait || '—')}｜一致性 ${escapeHtml(it.check?.consistency || '—')}
           </div>
         </div>`;
     };
@@ -296,6 +302,9 @@ const main = async () => {
               ${badge('窗口', '#2563eb')} 14:30 盘中估值
               ${badge('批次', '#2563eb')} ${i + 1}/${batches.length}
               ${badge('估算比例', '#0ea5e9')} ${estimatedCount}/${batches[i].length}（${estimatedRatio}）
+              ${badge('高回撤', '#ef4444')} ${highRiskCount}
+              ${badge('估值偏高', '#f97316')} ${highValCount}
+              ${badge('一致性差', '#f59e0b')} ${badConsistencyCount}
               ${badge('策略版本', '#64748b')} ${strategyHash}
             </div>
           </div>

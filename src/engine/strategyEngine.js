@@ -6,6 +6,7 @@ import { computeRisk } from './risk.js';
 import { calcUnifiedBacktest } from './strategies/unifiedBacktest.js';
 import { calcSignalBacktest } from './strategies/signalBacktest.js';
 import { detectFundType, mapFundTypeToCategory } from './fundType.js';
+import { buildChanlun, mergeChanlunSignals } from './chanlun.js';
 
 export const buildStrategy = ({ history, gsz, dwjz, name = '', code = '', indexHistory = [] }) => {
   const longHistory = Array.isArray(history) ? history : [];
@@ -213,7 +214,10 @@ export const buildStrategy = ({ history, gsz, dwjz, name = '', code = '', indexH
   const riskHigh = fundCategory === 'bond' ? 0.2 : fundCategory === 'qdii' ? 0.35 : 0.3;
 
   const executionPlan = (() => {
-    if (!metrics || !perfStats) return { action: '观望', reasons: ['数据不足'] };
+    if (!metrics || !perfStats) {
+      const fallbackAction = valuationExplain?.level === 'good' ? '加仓' : valuationExplain?.level === 'bad' ? '减仓' : '观望';
+      return { action: fallbackAction, reasons: ['数据不足（执行回退）'] };
+    }
     const groupBias = decision?.groupBias || '中性';
     const preferred = groupBias === '偏买' ? '加仓' : groupBias === '偏卖' ? '减仓' : null;
     let action = preferred || (decision?.stance === '偏多' && valuationExplain.level !== 'bad' ? '加仓'
@@ -250,8 +254,34 @@ export const buildStrategy = ({ history, gsz, dwjz, name = '', code = '', indexH
     }).filter((v) => Number.isFinite(v));
     const avgAbsRet = returns.length ? (returns.reduce((a, b) => a + Math.abs(b), 0) / returns.length) : 0.002;
     const minWaitDays = Math.max(2, Math.min(15, Math.ceil(0.02 / Math.max(avgAbsRet, 0.002))));
-    const positionRange = action === '加仓' ? '40%-60%' : action === '减仓' ? '20%-40%' : '30%-50%';
-    return { action, reasons, driver, trigger, minWaitDays, positionRange };
+    let positionRange = action === '加仓' ? '40%-60%' : action === '减仓' ? '20%-40%' : '30%-50%';
+
+    const chanlun = buildChanlun({ series: metricHistory, minGap: 5, minPct: 0.01 });
+    const chanMerge = mergeChanlunSignals({ baseAction: action, chanlun, fundTypeConf });
+    action = chanMerge.action;
+    if (chanMerge.confidenceBoost) reasons.push(`缠论一致性提升 +${Math.round(chanMerge.confidenceBoost * 100)}%`);
+    if (chanMerge.sellSignals.length) reasons.push(`缠论卖点：${chanMerge.sellSignals.map((s) => s.type).join('、')}`);
+    if (chanMerge.buySignals.length) reasons.push(`缠论买点：${chanMerge.buySignals.map((s) => s.type).join('、')}`);
+
+    if (chanMerge.isIndexLike) {
+      if (chanMerge.buySignals.some((s) => s.type === '一买')) positionRange = '60%-80%';
+      if (chanMerge.buySignals.some((s) => s.type === '二买')) positionRange = '50%-60%';
+      if (chanMerge.buySignals.some((s) => s.type === '三买')) positionRange = '30%-40%';
+    } else if (chanlun.pricePos === '中枢内') {
+      positionRange = '30%-40%';
+    }
+
+    const lastValue = metricHistory[metricHistory.length - 1]?.value;
+    if (chanlun.lastCenter && Number.isFinite(lastValue)) {
+      if (lastValue < chanlun.lastCenter.low * 0.97) {
+        action = '减仓';
+        reasons.push('中枢止损：跌破下轨3%');
+      }
+      if (lastValue > chanlun.lastCenter.high * 1.05) reasons.push('中枢上轨+5%：止盈30%仓位');
+      if (lastValue > chanlun.lastCenter.high * 1.1) reasons.push('中枢上轨+10%：止盈70%仓位');
+    }
+
+    return { action, reasons, driver, trigger, minWaitDays, positionRange, chanlun };
   })();
 
   const values = metricHistory.map((it) => it.value).filter((v) => Number.isFinite(v));
