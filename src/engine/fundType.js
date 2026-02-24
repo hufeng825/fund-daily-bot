@@ -1,4 +1,10 @@
 export const FUND_TYPES = {
+  equity_ai: {
+    name: '科技主题-人工智能',
+    keywords: ['人工智能', '机器人', '人形机器人', '机器人ETF', 'AI主题', '机器视觉', '智驾', '大模型'],
+    search_focus: ['AI算力', '机器人量产', '政策扶持', '应用落地', '行业订单'],
+    macro_factors: ['GPU产能', 'AI投资', '科技政策', '制造业景气']
+  },
   commodity_gold: {
     name: '商品型-黄金',
     keywords: ['黄金ETF', '贵金属', '上海金', 'COMEX', '伦敦金'],
@@ -12,7 +18,7 @@ export const FUND_TYPES = {
     macro_factors: ['EIA库存', 'IEA月报', 'OPEC会议', '美元汇率']
   },
   equity_tech: {
-    name: '股票型-科技',
+    name: '科技主题-泛科技',
     keywords: ['科技', '半导体', '芯片', 'AI', '人工智能', 'TMT'],
     search_focus: ['国产替代', 'AI算力', '半导体周期', '大模型', '政策扶持'],
     macro_factors: ['全球半导体销售额', '费城半导体指数', 'GPU产能', '科技政策']
@@ -88,6 +94,12 @@ export const FUND_TYPES = {
     keywords: ['纳斯达克', '标普500', '美股', '道琼斯'],
     search_focus: ['美联储政策', '科技股财报', 'AI投资', '经济软着陆'],
     macro_factors: ['美联储点阵图', '美股盈利预期', 'VIX指数', '美元流动性']
+  },
+  qdii_hk_tech: {
+    name: '指数主题-恒生科技',
+    keywords: ['恒生科技', '恒生科技ETF', '恒科'],
+    search_focus: ['南向资金', '港股通', '互联网政策', '美联储降息'],
+    macro_factors: ['港股估值', 'AH溢价', '人民币汇率', '美联储政策']
   },
   qdii_hk: {
     name: 'QDII-港股',

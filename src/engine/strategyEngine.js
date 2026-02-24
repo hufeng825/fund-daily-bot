@@ -1,4 +1,4 @@
-import { THRESHOLDS, INDICATOR_CONFIG, HISTORY_WINDOWS, STRATEGY_WINDOW, UI_THRESHOLDS, FACTOR_WEIGHTS, QUANT_THRESHOLDS } from './config.js';
+import { THRESHOLDS, INDICATOR_CONFIG, HISTORY_WINDOWS, STRATEGY_WINDOW, UI_THRESHOLDS, FACTOR_WEIGHTS, STRATEGY_VERSION, STRATEGY_GATES } from './config.js';
 import { stdSimple, sma, maxDrawdown } from './analytics.js';
 import { computeValuationExplain } from './derive.js';
 import { computeQuantMetrics } from './quantModel.js';
@@ -6,7 +6,6 @@ import { computeRisk } from './risk.js';
 import { calcUnifiedBacktest } from './strategies/unifiedBacktest.js';
 import { calcSignalBacktest } from './strategies/signalBacktest.js';
 import { detectFundType, mapFundTypeToCategory } from './fundType.js';
-import { buildChanlun, mergeChanlunSignals } from './chanlun.js';
 
 export const buildStrategy = ({ history, gsz, dwjz, name = '', code = '', indexHistory = [] }) => {
   const longHistory = Array.isArray(history) ? history : [];
@@ -40,6 +39,43 @@ export const buildStrategy = ({ history, gsz, dwjz, name = '', code = '', indexH
   const unifiedBacktest = calcUnifiedBacktest(longHistory.slice(-categoryWindow), lookahead, adaptiveMin);
 
   const signalBacktest = calcSignalBacktest(metricHistory.map((it) => it.value).filter((v) => Number.isFinite(v)), lookahead);
+
+  const stabilityMonitor = (() => {
+    if (!metricPoints.length) return { window: 60, winRate: null, avgRet: null, maxDrawdown: null, prevWinRate: null, drift: null, driftLevel: '未知' };
+    const window = 60;
+    const slice = metricPoints.slice(-window);
+    const prevSlice = metricPoints.slice(-window * 2, -window);
+    const rets = [];
+    for (let i = 1; i < slice.length; i += 1) {
+      const prev = slice[i - 1].v;
+      const curr = slice[i].v;
+      if (Number.isFinite(prev) && Number.isFinite(curr) && prev) rets.push((curr - prev) / prev);
+    }
+    const wins = rets.filter(r => r > 0).length;
+    const winRate = rets.length ? wins / rets.length : null;
+    const avgRet = rets.length ? rets.reduce((a, b) => a + b, 0) / rets.length : null;
+    let peak = slice[0].v;
+    let maxDd = 0;
+    slice.forEach((p) => {
+      if (p.v > peak) peak = p.v;
+      if (peak) maxDd = Math.max(maxDd, (peak - p.v) / peak);
+    });
+    const prevRets = [];
+    for (let i = 1; i < prevSlice.length; i += 1) {
+      const prev = prevSlice[i - 1].v;
+      const curr = prevSlice[i].v;
+      if (Number.isFinite(prev) && Number.isFinite(curr) && prev) prevRets.push((curr - prev) / prev);
+    }
+    const prevWins = prevRets.filter(r => r > 0).length;
+    const prevWinRate = prevRets.length ? prevWins / prevRets.length : null;
+    const drift = (Number.isFinite(winRate) && Number.isFinite(prevWinRate)) ? (winRate - prevWinRate) : null;
+    const driftLevel = drift !== null
+      ? drift <= -STRATEGY_GATES.driftDrop ? '下降'
+        : drift >= STRATEGY_GATES.driftDrop ? '上升'
+          : '稳定'
+      : '未知';
+    return { window, winRate, avgRet, maxDrawdown: Number.isFinite(maxDd) ? maxDd : null, prevWinRate, drift, driftLevel };
+  })();
 
   const trendBand = (() => {
     if (!longHistory.length) return { level: 'neutral', strength: '弱', label: '中性' };
@@ -213,22 +249,145 @@ export const buildStrategy = ({ history, gsz, dwjz, name = '', code = '', indexH
 
   const riskHigh = fundCategory === 'bond' ? 0.2 : fundCategory === 'qdii' ? 0.35 : 0.3;
 
+  const supportResistanceHint = (() => {
+    if (!longHistory.length) return null;
+    const window = Math.min(120, longHistory.length);
+    const slice = longHistory.slice(-window);
+    const values = slice.map((p) => p.value).filter((v) => Number.isFinite(v));
+    if (values.length < 20) return null;
+    const peaks = [];
+    const troughs = [];
+    for (let i = 1; i < values.length - 1; i += 1) {
+      if (values[i] > values[i - 1] && values[i] > values[i + 1]) peaks.push(values[i]);
+      if (values[i] < values[i - 1] && values[i] < values[i + 1]) troughs.push(values[i]);
+    }
+    const cluster = (levels) => {
+      const out = [];
+      const tol = 0.015;
+      levels.forEach((p) => {
+        const hit = out.find((l) => Math.abs(l.value - p) / Math.max(1e-6, l.value) <= tol);
+        if (hit) {
+          hit.value = (hit.value * hit.count + p) / (hit.count + 1);
+          hit.count += 1;
+        } else {
+          out.push({ value: p, count: 1 });
+        }
+      });
+      return out.sort((a, b) => b.count - a.count).slice(0, 3);
+    };
+    const supports = cluster(troughs).map((lv) => lv.value).filter((v) => v <= values[values.length - 1]);
+    const resistances = cluster(peaks).map((lv) => lv.value).filter((v) => v >= values[values.length - 1]);
+    const support = supports.length ? Math.max(...supports) : null;
+    const resistance = resistances.length ? Math.min(...resistances) : null;
+    const last = values[values.length - 1];
+    const distSupport = Number.isFinite(support) ? (last - support) / last : null;
+    const distResistance = Number.isFinite(resistance) ? (resistance - last) / last : null;
+    let position = null;
+    if (Number.isFinite(support) && Number.isFinite(resistance) && resistance > support) {
+      position = (last - support) / (resistance - support);
+    }
+    const nearRisk = (Number.isFinite(distSupport) && distSupport <= 0.01) || (Number.isFinite(distResistance) && distResistance <= 0.01);
+    let instruction = '暂无关键支撑/阻力，先观望';
+    if (Number.isFinite(distSupport) && distSupport <= 0.015) instruction = '接近支撑位，小仓试探更优';
+    else if (Number.isFinite(distResistance) && distResistance <= 0.015) instruction = '接近阻力位，谨慎/减仓更优';
+    else if (Number.isFinite(distSupport) || Number.isFinite(distResistance)) instruction = '处于区间中部，耐心观望等待确认';
+    return { last, support, resistance, distSupport, distResistance, position, nearRisk, instruction };
+  })();
+
   const executionPlan = (() => {
-    if (!metrics || !perfStats) {
-      const fallbackAction = valuationExplain?.level === 'good' ? '加仓' : valuationExplain?.level === 'bad' ? '减仓' : '观望';
-      return { action: fallbackAction, reasons: ['数据不足（执行回退）'] };
-    }
+    if (!metrics || !perfStats) return { action: '观望', reasons: ['数据不足'] };
     const groupBias = decision?.groupBias || '中性';
-    const preferred = groupBias === '偏买' ? '加仓' : groupBias === '偏卖' ? '减仓' : null;
-    let action = preferred || (decision?.stance === '偏多' && valuationExplain.level !== 'bad' ? '加仓'
-      : decision?.stance === '谨慎' || valuationExplain.level === 'bad' ? '减仓'
-      : '观望');
+    const intradayChange = Number.isFinite(gsz) && Number.isFinite(dwjz) && dwjz ? (gsz / dwjz - 1) : null;
+    const intradayBase = (() => {
+      if (fundCategory === 'bond') return 0.004;
+      if (fundCategory === 'qdii') return 0.015;
+      if (fundTypeConf?.type_key?.startsWith('commodity_')) return 0.016;
+      return QUANT_THRESHOLDS.intradayUp;
+    })();
+    const intradayBias = Number.isFinite(intradayChange)
+      ? (intradayChange >= intradayBase ? 'buy' : intradayChange <= -intradayBase ? 'sell' : null)
+      : null;
+    const intradayLevel = Number.isFinite(intradayChange)
+      ? (Math.abs(intradayChange) >= intradayBase * 2 ? '强' : Math.abs(intradayChange) >= intradayBase ? '中' : Math.abs(intradayChange) >= intradayBase * 0.5 ? '弱' : null)
+      : null;
+    const recentMomentum = (() => {
+      const values = metricHistory.map((p) => p.value).filter((v) => Number.isFinite(v));
+      if (values.length < 6) return { change: null, days: 0 };
+      const window = fundCategory === 'bond' ? 5 : fundCategory === 'money' ? 5 : fundCategory === 'qdii' ? 10 : fundTypeConf?.type_key?.startsWith('commodity_') ? 8 : 10;
+      const idx = values.length - 1 - window;
+      if (idx < 0) return { change: null, days: window };
+      const base = values[idx];
+      const last = values[values.length - 1];
+      if (!Number.isFinite(base) || !Number.isFinite(last) || base === 0) return { change: null, days: window };
+      return { change: (last - base) / base, days: window };
+    })();
+    const recentStreak = (() => {
+      const values = metricHistory.map((p) => p.value).filter((v) => Number.isFinite(v));
+      if (values.length < 3) return { dir: null, count: 0 };
+      let dir = null;
+      let count = 0;
+      for (let i = values.length - 1; i > 0; i -= 1) {
+        const diff = values[i] - values[i - 1];
+        const step = diff === 0 ? 0 : diff > 0 ? 1 : -1;
+        if (dir === null) {
+          if (step === 0) continue;
+          dir = step;
+          count = 1;
+          continue;
+        }
+        if (step === dir) {
+          count += 1;
+        } else {
+          break;
+        }
+      }
+      if (!dir) return { dir: null, count: 0 };
+      return { dir: dir > 0 ? 'up' : 'down', count };
+    })();
+    const coreSignal = (() => {
+      if (Number.isFinite(perfStats.mdd) && perfStats.mdd >= UI_THRESHOLDS.riskHigh) return 'sell';
+      if (Number.isFinite(perfStats.mdd) && perfStats.mdd >= (UI_THRESHOLDS.riskHigh * 0.75)) return 'buy';
+      if (valuationExplain.level === 'good') return 'buy';
+      if (valuationExplain.level === 'bad') return 'sell';
+      return null;
+    })();
+    const secondarySignal = bestSignal?.side || null;
+    let action = coreSignal === 'buy' ? '加仓'
+      : coreSignal === 'sell' ? '减仓'
+      : groupBias === '偏买' ? '加仓' : groupBias === '偏卖' ? '减仓' : '观望';
+    let actionTier = 'normal';
     const reasons = [];
-    if (longHistory.length < INDICATOR_CONFIG.minSignalDays) {
-      action = '观望';
-      reasons.push('历史样本不足，强制观望');
-    }
     if (decision?.groupBias) reasons.push(`组回测倾向：${decision.groupBias}`);
+    if (Number.isFinite(intradayChange)) reasons.push(`盘中估值：${(intradayChange * 100).toFixed(2)}%`);
+    if (intradayLevel) reasons.push(`盘中强度：${intradayLevel}`);
+    if (Number.isFinite(recentMomentum.change)) reasons.push(`近${recentMomentum.days}日涨跌：${(recentMomentum.change * 100).toFixed(2)}%`);
+    if (recentStreak.dir && recentStreak.count >= 3) reasons.push(`连续${recentStreak.count}日${recentStreak.dir === 'up' ? '上涨' : '下跌'}`);
+    if (intradayBias === 'buy' && valuationExplain.level === 'bad') reasons.push('盘中走强但估值偏高，追涨惩罚');
+    if (intradayBias === 'sell' && valuationExplain.level === 'good') reasons.push('盘中走弱但估值偏低，恐慌惩罚');
+    const allowIntradayBuy = intradayBias === 'buy' && valuationExplain.level !== 'bad' && trendBand.level !== 'weak';
+    const allowIntradaySell = intradayBias === 'sell' && valuationExplain.level !== 'good' && trendBand.level !== 'strong';
+    if (!coreSignal && action === '观望' && allowIntradayBuy) {
+      action = '加仓';
+      actionTier = 'light';
+      reasons.push('盘中估值走强，仅作确认触发小仓加仓');
+    }
+    if (!coreSignal && action === '观望' && allowIntradaySell) {
+      action = '减仓';
+      actionTier = 'light';
+      reasons.push('盘中估值走弱，仅作确认触发减仓');
+    }
+    if (coreSignal && secondarySignal && coreSignal !== secondarySignal) {
+      reasons.push('核心信号与次级确认冲突：以核心信号为准（次级仅作提示）');
+    }
+    if (!coreSignal && secondarySignal) {
+      reasons.push(`次级确认：${secondarySignal === 'buy' ? '偏买' : '偏卖'}`);
+      if (secondarySignal === 'buy' && trendBand.level !== 'weak') { action = '加仓'; actionTier = 'light'; }
+      if (secondarySignal === 'sell' && trendBand.level !== 'strong') { action = '减仓'; actionTier = 'light'; }
+    }
+    if (!coreSignal && !secondarySignal && action !== '观望') {
+      actionTier = 'light';
+      reasons.push('组回测倾向触发小仓执行');
+    }
     if (bestSignal?.name && Number.isFinite(bestSignal.winRate)) {
       reasons.push(`回测最优：${bestSignal.name}（胜率 ${(bestSignal.winRate * 100).toFixed(1)}% / 样本 ${bestSignal.sample || 0}）`);
     }
@@ -237,55 +396,59 @@ export const buildStrategy = ({ history, gsz, dwjz, name = '', code = '', indexH
     if (Number.isFinite(premium)) reasons.push(`溢价：${(premium * 100).toFixed(2)}%`);
     if (Number.isFinite(perfStats.mdd)) reasons.push(`回撤：${(perfStats.mdd * 100).toFixed(2)}%`);
     if (metrics.lastRsi) reasons.push(`RSI：${metrics.lastRsi.toFixed(0)}`);
-    const driver = Number.isFinite(perfStats.mdd) && perfStats.mdd >= riskHigh
-      ? '风险'
-      : valuationExplain.level === 'bad' || valuationExplain.level === 'good'
-        ? '估值'
-        : Number.isFinite(perfStats.mdd) && perfStats.mdd >= riskHigh * 0.7
-          ? '回撤'
-          : metrics.trendScore >= 70 || metrics.trendScore <= 40
-            ? '趋势'
-            : '情绪';
-    const trigger = `${valuationExplain.label} / ${decision?.trend || '趋势中性'} / ${decision?.oversold || '中性'}`;
-    const returns = metricHistory.slice(1).map((v, i) => {
-      const prev = metricHistory[i]?.value;
-      if (!Number.isFinite(prev) || !Number.isFinite(v?.value)) return null;
-      return (v.value - prev) / prev;
-    }).filter((v) => Number.isFinite(v));
-    const avgAbsRet = returns.length ? (returns.reduce((a, b) => a + Math.abs(b), 0) / returns.length) : 0.002;
-    const minWaitDays = Math.max(2, Math.min(15, Math.ceil(0.02 / Math.max(avgAbsRet, 0.002))));
-    let positionRange = action === '加仓' ? '40%-60%' : action === '减仓' ? '20%-40%' : '30%-50%';
-
-    const chanlun = buildChanlun({ series: metricHistory, minGap: 5, minPct: 0.01 });
-    const chanMerge = mergeChanlunSignals({ baseAction: action, chanlun, fundTypeConf });
-    action = chanMerge.action;
-    if (chanMerge.confidenceBoost) reasons.push(`缠论一致性提升 +${Math.round(chanMerge.confidenceBoost * 100)}%`);
-    if (chanMerge.sellSignals.length) reasons.push(`缠论卖点：${chanMerge.sellSignals.map((s) => s.type).join('、')}`);
-    if (chanMerge.buySignals.length) reasons.push(`缠论买点：${chanMerge.buySignals.map((s) => s.type).join('、')}`);
-
-    if (chanMerge.isIndexLike) {
-      if (chanMerge.buySignals.some((s) => s.type === '一买')) positionRange = '60%-80%';
-      if (chanMerge.buySignals.some((s) => s.type === '二买')) positionRange = '50%-60%';
-      if (chanMerge.buySignals.some((s) => s.type === '三买')) positionRange = '30%-40%';
-    } else if (chanlun.pricePos === '中枢内') {
-      positionRange = '30%-40%';
+    if (Number.isFinite(perfStats.mdd) && perfStats.mdd >= riskHigh) {
+      action = '减仓';
+      reasons.push(`风控：回撤≥${(riskHigh * 100).toFixed(0)}%`);
     }
-
-    const lastValue = metricHistory[metricHistory.length - 1]?.value;
-    if (chanlun.lastCenter && Number.isFinite(lastValue)) {
-      if (lastValue < chanlun.lastCenter.low * 0.97) {
-        action = '减仓';
-        reasons.push('中枢止损：跌破下轨3%');
+    if (Number.isFinite(premium) && premium > premiumGate && valuationExplain.level !== 'good') {
+      action = action === '加仓' ? '观望' : '减仓';
+      reasons.push(`溢价门槛：>${(premiumGate * 100).toFixed(2)}%`);
+    }
+    if (stabilityMonitor?.driftLevel === '下降' && Number.isFinite(stabilityMonitor.winRate) && stabilityMonitor.winRate < STRATEGY_GATES.driftMinWin) {
+      action = '观望';
+      reasons.push('策略稳定性下降，触发降级观望');
+    }
+    const side = action === '加仓' ? 'buy' : action === '减仓' ? 'sell' : null;
+    if (side) {
+      let strength = 0;
+      if (coreSignal === side) strength += 2;
+      if (secondarySignal === side) strength += 1;
+      if (intradayBias === side && (coreSignal || secondarySignal)) {
+        strength += intradayLevel === '强' ? 2 : intradayLevel === '中' ? 1 : 0.5;
       }
-      if (lastValue > chanlun.lastCenter.high * 1.05) reasons.push('中枢上轨+5%：止盈30%仓位');
-      if (lastValue > chanlun.lastCenter.high * 1.1) reasons.push('中枢上轨+10%：止盈70%仓位');
+      if (intradayBias && intradayBias !== side && intradayLevel === '强') strength -= 1;
+      if (Number.isFinite(recentMomentum.change)) {
+        if (side === 'buy' && recentMomentum.change <= -0.03 && valuationExplain.level !== 'bad') strength += 1;
+        if (side === 'sell' && recentMomentum.change >= 0.04 && valuationExplain.level !== 'good') strength += 1;
+      }
+      if (recentStreak.dir && recentStreak.count >= 3) {
+        if (side === 'buy' && recentStreak.dir === 'down' && valuationExplain.level !== 'bad') strength += 1;
+        if (side === 'sell' && recentStreak.dir === 'up' && valuationExplain.level !== 'good') strength += 1;
+      }
+      if ((decision?.groupBias === '偏买' && side === 'buy') || (decision?.groupBias === '偏卖' && side === 'sell')) strength += 1;
+      if (strength >= 4) actionTier = 'strong';
+      else if (strength >= 2) actionTier = 'normal';
+      else actionTier = 'light';
     }
-
-    return { action, reasons, driver, trigger, minWaitDays, positionRange, chanlun };
+    let positionRange = action === '加仓' ? '40%-60%' : action === '减仓' ? '20%-40%' : '30%-50%';
+    if (actionTier === 'strong' && action === '加仓') positionRange = '60%-80%';
+    if (actionTier === 'strong' && action === '减仓') positionRange = '10%-20%';
+    if (actionTier === 'light' && action === '加仓') positionRange = '20%-30%';
+    if (actionTier === 'light' && action === '减仓') positionRange = '20%-30%';
+    return { action, actionTier, positionRange, reasons, driver: decision?.trend || '趋势中性', trigger: valuationExplain.label, instructionHint: supportResistanceHint?.instruction, supportResistanceHint, intradayLevel, recentStreak };
   })();
 
   const values = metricHistory.map((it) => it.value).filter((v) => Number.isFinite(v));
   const signalBacktestSimple = calcSignalBacktest(values, lookahead);
+
+  const strategySignature = (() => {
+    const raw = JSON.stringify({ v: STRATEGY_VERSION, windows: STRATEGY_WINDOW, thresholds: THRESHOLDS, quant: QUANT_THRESHOLDS });
+    let hash = 0;
+    for (let i = 0; i < raw.length; i += 1) {
+      hash = (hash * 31 + raw.charCodeAt(i)) % 1000000007;
+    }
+    return `v${STRATEGY_VERSION}-${hash.toString(16)}`;
+  })();
 
   return {
     metrics,
@@ -293,6 +456,8 @@ export const buildStrategy = ({ history, gsz, dwjz, name = '', code = '', indexH
     valuationExplain,
     decision,
     executionPlan,
+    stabilityMonitor,
+    strategyMeta: { version: STRATEGY_VERSION, signature: strategySignature },
     bestSignal,
     bestSignalTier,
     signalBacktest: signalBacktestSimple,

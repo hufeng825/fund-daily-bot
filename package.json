@@ -7,7 +7,7 @@
     "run": "node ./src/index.js"
   },
   "dependencies": {
-    "dayjs": "^1.11.19",
-    "nodemailer": "^6.9.13"
+    "nodemailer": "^6.9.13",
+    "dayjs": "^1.11.19"
   }
 }

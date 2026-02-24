@@ -22,6 +22,8 @@ export const computeQuantMetrics = ({ metricPoints, longHistory, indexHistory, p
       sentimentScore: 0,
       riskScore: 0,
       flowScore: 0,
+      intradayScore: 0,
+      intradayBias: 'neutral',
       liquidityScore: null,
       consistencyScore: null,
       linkageScore: null,
@@ -95,6 +97,15 @@ export const computeQuantMetrics = ({ metricPoints, longHistory, indexHistory, p
     ? fund.marketPremium
     : (Number.isFinite(gsz) && Number.isFinite(dwjz) ? (gsz - dwjz) / dwjz : 0);
   const flowScore = clamp(50 + momentum * 200 + premium * 200);
+  const intradayChange = Number.isFinite(fund?.gszzl)
+    ? fund.gszzl / 100
+    : (Number.isFinite(gsz) && Number.isFinite(dwjz) && dwjz ? (gsz / dwjz - 1) : 0);
+  const chasePenalty = valuationPos >= 80 && intradayChange > 0 ? 18 : 0;
+  const panicPenalty = valuationPos <= 20 && intradayChange < 0 ? 18 : 0;
+  const intradayScore = clamp(50 + intradayChange * 200 - chasePenalty - panicPenalty);
+  const intradayBias = intradayChange >= QUANT_THRESHOLDS.intradayUp ? 'buy'
+    : intradayChange <= QUANT_THRESHOLDS.intradayDown ? 'sell'
+      : 'neutral';
 
   const liquidityScore = null;
 
@@ -124,6 +135,7 @@ export const computeQuantMetrics = ({ metricPoints, longHistory, indexHistory, p
     { key: 'sentiment', name: '情绪因子', value: sentimentScore },
     { key: 'risk', name: '风险因子', value: riskScore },
     { key: 'fund_flow', name: '资金因子', value: flowScore },
+    { key: 'intraday', name: '盘中估值', value: intradayScore },
     { key: 'liquidity', name: '流动性因子', value: Number.isFinite(liquidityScore) ? liquidityScore : 50 },
     { key: 'consistency', name: '一致性因子', value: Number.isFinite(consistencyScore) ? consistencyScore : 50 },
     { key: 'linkage', name: '联动因子', value: Number.isFinite(linkageScore) ? linkageScore : 50 }
@@ -210,6 +222,8 @@ export const computeQuantMetrics = ({ metricPoints, longHistory, indexHistory, p
     sentimentScore,
     riskScore,
     flowScore,
+    intradayScore,
+    intradayBias,
     liquidityScore,
     consistencyScore,
     linkageScore,

@@ -48,6 +48,8 @@ export const QUANT_THRESHOLDS = {
     commodity: 0.012,
     reits: 0.01
   },
+  intradayUp: 0.012,
+  intradayDown: -0.012,
   liquidityLow: 0.5,
   liquidityHigh: 5,
   liquidityReportLow: 50,
@@ -56,11 +58,12 @@ export const QUANT_THRESHOLDS = {
 
 export const FACTOR_WEIGHTS = {
   base: {
-    trend: 0.15,
-    oversold: 0.15,
-    sentiment: 0.08,
-    risk: 0.25,
-    fund_flow: 0.12,
+    trend: 0.08,
+    oversold: 0.12,
+    sentiment: 0.05,
+    risk: 0.3,
+    fund_flow: 0.08,
+    intraday: 0.06,
     liquidity: 0.1,
     consistency: 0.1,
     linkage: 0.05
@@ -86,5 +89,15 @@ export const SEASONAL_SIGNAL = {
 export const STRATEGY_GATES = {
   minDataQuality: 'mid',
   minCoverageRatio: 0.6,
-  minConfidence: '中'
+  minConfidence: '中',
+  driftDrop: 0.08,
+  driftMinWin: 0.48,
+  cooldownBase: 7,
+  cooldownVolHigh: 0.03,
+  cooldownVolExtreme: 0.05,
+  cooldownAddHigh: 3,
+  cooldownAddExtreme: 6,
+  minHoldDaysC: 7
 };
+
+export const STRATEGY_VERSION = '2026.02.21';
