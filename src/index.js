@@ -132,12 +132,12 @@ const main = async () => {
 
   for (const r of results) {
     if (!r.ok) {
-      lines.push(`${r.item.code} | 获取失败: ${r.error?.message || 'unknown'}`);
+      rows.push({ action: '观望', row: `${r.item.code} | 获取失败: ${r.error?.message || 'unknown'}`, tier: null });
       continue;
     }
     const f = r.data;
     if (f.skip) {
-      lines.push(`${f.name} (#${f.code}) | ${f.reason}`);
+      rows.push({ action: '观望', row: `${f.name} (#${f.code}) | ${f.reason}`, tier: null });
       continue;
     }
     const diff = (f.gsz && f.dwjz) ? ((f.gsz - f.dwjz) / f.dwjz) * 100 : null;
