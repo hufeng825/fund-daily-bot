@@ -1,4 +1,4 @@
-import { THRESHOLDS, INDICATOR_CONFIG, HISTORY_WINDOWS, STRATEGY_WINDOW, UI_THRESHOLDS, FACTOR_WEIGHTS, STRATEGY_VERSION, STRATEGY_GATES } from './config.js';
+import { THRESHOLDS, INDICATOR_CONFIG, HISTORY_WINDOWS, STRATEGY_WINDOW, UI_THRESHOLDS, FACTOR_WEIGHTS, STRATEGY_VERSION, STRATEGY_GATES, QUANT_THRESHOLDS } from './config.js';
 import { stdSimple, sma, maxDrawdown } from './analytics.js';
 import { computeValuationExplain } from './derive.js';
 import { computeQuantMetrics } from './quantModel.js';
