@@ -1,9 +1,21 @@
 import { jitter, sleep } from './utils.js';
 
 const fetchText = async (url) => {
-  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.text();
+  const timeoutMs = Number(process.env.HTTP_TIMEOUT_MS || 9000);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => {
+    try { ctrl.abort(); } catch {}
+  }, timeoutMs);
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: ctrl.signal
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 const parseJsonp = (text) => {
@@ -57,9 +69,10 @@ export const fetchFundProfileLite = async (code) => {
 
 export const fetchGszWithRetry = async (code, retries = 2) => {
   let lastErr = null;
+  const fastMode = String(process.env.FAST_MODE || '1') === '1';
   for (let i = 0; i <= retries; i += 1) {
     try {
-      await jitter();
+      await jitter(fastMode ? 0 : 100, fastMode ? 50 : 300);
       const data = await fetchGszPrimary(code);
       return { ...data, _source: 'fundgz' };
     } catch (err) {

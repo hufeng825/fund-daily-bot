@@ -1,6 +1,6 @@
-# Fund Daily Bot（14:30 盘中策略）
+# Fund Daily Bot（13:40 盘中策略）
 
-> 独立于主工程的定时任务，不影响现有代码。支持 GitHub Actions 每个交易日 14:30 自动计算盘中预估涨跌 + 简短加减仓建议，并通过邮箱发送。
+> 独立于主工程的定时任务，不影响现有代码。支持 GitHub Actions 每个交易日 13:40 自动计算盘中预估涨跌 + 简短加减仓建议，并通过邮箱发送。
 
 ## 目录结构
 ```
@@ -69,7 +69,7 @@ fund-daily-bot/
 GitHub → Actions 页面 → 启用工作流。
 
 ### Step 4. 等待触发
-每个交易日北京时间 14:30 自动执行。
+每个交易日北京时间 13:40 自动执行。
 如需立即测试：Actions → Fund Daily Strategy → Run workflow。
 
 ---

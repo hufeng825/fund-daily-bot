@@ -92,6 +92,8 @@ export const STRATEGY_GATES = {
   minConfidence: '中',
   driftDrop: 0.08,
   driftMinWin: 0.48,
+  minBacktestSample: 40,
+  minBacktestWin: 0.53,
   cooldownBase: 7,
   cooldownVolHigh: 0.03,
   cooldownVolExtreme: 0.05,
@@ -100,4 +102,73 @@ export const STRATEGY_GATES = {
   minHoldDaysC: 7
 };
 
-export const STRATEGY_VERSION = '2026.02.21';
+export const STRATEGY_DECISION_V2 = {
+  thresholds: {
+    buy: 1.6,
+    buySoft: 1.9,
+    buyContext: 1.1,
+    sell: -2.2,
+    sellSoft: -2.6
+  },
+  weights: {
+    plan: 1.4,
+    indicator: 1.0,
+    backtest: 0.9,
+    ai: 0.6,
+    valuation: 0.8,
+    trend: 0.7,
+    tieBreaker: 0.5,
+    momentum: 0.6,
+    premiumRisk: 0.8,
+    highRisk: 1.1,
+    tuningPenalty: 0.25,
+    tuningBias: 0.2,
+    softPenalty: 0.3,
+    backtestPenaltyBuy: 0.3,
+    backtestPenaltySell: 0.2
+  },
+  momentum: {
+    buy: -0.02,
+    sell: 0.025,
+    bearConfirm: 0.015,
+    sellSuppress: -0.01,
+    intradaySellSuppressPct: -0.8,
+    meanReversionBuyPct: -1.2,
+    meanReversionSellPct: 2.8,
+    confirmMinSamples: 3,
+    confirmLookback: 5,
+    confirmPct: 0.18
+  },
+  rebalanceBand: {
+    base: 0.04,
+    costScale: 20,
+    volScale: 1.5,
+    max: 0.22
+  },
+  costs: {
+    feeBps: { money: 4, bond: 8, equity: 12, qdii: 18, commodity: 18 },
+    slippageBps: { money: 2, bond: 3, equity: 5, qdii: 8, commodity: 8 },
+    timingBps: { intraday: 3, close: 1 }
+  },
+  distributionGuard: {
+    minPool: 12,
+    buyMaxRatio: 0.62,
+    sellMaxRatio: 0.58,
+    holdMaxRatio: 0.7,
+    blockedMaxRatio: 0.35
+  },
+  portfolioGuard: {
+    sameSideMaxRatio: 0.62,
+    sameSideMaxCount: 6
+  },
+  regime: {
+    trend: { trendScoreMin: 68, volMax: 0.022 },
+    panic: { drawdownMin: 0.26, volMin: 0.035, intradayDropPct: -2.2 }
+  },
+  hardGuards: {
+    inconsistentDataStop: true,
+    minCoverageHard: 0.25
+  }
+};
+
+export const STRATEGY_VERSION = '2026.02.27';

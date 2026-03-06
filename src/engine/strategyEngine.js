@@ -6,6 +6,7 @@ import { computeRisk } from './risk.js';
 import { calcUnifiedBacktest } from './strategies/unifiedBacktest.js';
 import { calcSignalBacktest } from './strategies/signalBacktest.js';
 import { detectFundType, mapFundTypeToCategory } from './fundType.js';
+import { computeStrategyDecision } from './strategyDecision.js';
 
 export const buildStrategy = ({ history, gsz, dwjz, name = '', code = '', indexHistory = [] }) => {
   const longHistory = Array.isArray(history) ? history : [];
@@ -441,6 +442,36 @@ export const buildStrategy = ({ history, gsz, dwjz, name = '', code = '', indexH
   const values = metricHistory.map((it) => it.value).filter((v) => Number.isFinite(v));
   const signalBacktestSimple = calcSignalBacktest(values, lookahead);
 
+  const recentMomentumLite = (() => {
+    const values = metricHistory.map((p) => p.value).filter((v) => Number.isFinite(v));
+    if (values.length < 6) return { change: null, days: 0 };
+    const window = fundCategory === 'bond' ? 5 : fundCategory === 'money' ? 5 : fundCategory === 'qdii' ? 10 : fundTypeConf?.type_key?.startsWith('commodity_') ? 8 : 10;
+    const idx = values.length - 1 - window;
+    if (idx < 0) return { change: null, days: window };
+    const base = values[idx];
+    const last = values[values.length - 1];
+    if (!Number.isFinite(base) || !Number.isFinite(last) || base === 0) return { change: null, days: window };
+    return { change: (last - base) / base, days: window };
+  })();
+  const strategyDecision = computeStrategyDecision({
+    executionPlan,
+    decision,
+    signalVote: { side: bestSignal?.side || 'neutral' },
+    signalBacktest: signalBacktestSimple,
+    recentMomentum: recentMomentumLite,
+    metrics: { ...metrics, intradayPct: (Number.isFinite(gsz) && Number.isFinite(dwjz) && dwjz) ? ((gsz - dwjz) / dwjz) * 100 : null },
+    valuationExplain,
+    mddValue: perfStats?.mdd ?? null,
+    dataQuality: { level: 'mid', inconsistent: Boolean(longHistory?._meta?.inconsistentHard) },
+    confidence: { level: metrics?.confidence || '中' },
+    dataCoverage: { coverage: Math.min(1, metricHistory.length / Math.max(1, categoryWindow)) },
+    fundTypeConf,
+    tuning: null,
+    bestSignal,
+    cooldownBlock: false,
+    premium
+  });
+
   const strategySignature = (() => {
     const raw = JSON.stringify({ v: STRATEGY_VERSION, windows: STRATEGY_WINDOW, thresholds: THRESHOLDS, quant: QUANT_THRESHOLDS });
     let hash = 0;
@@ -456,6 +487,7 @@ export const buildStrategy = ({ history, gsz, dwjz, name = '', code = '', indexH
     valuationExplain,
     decision,
     executionPlan,
+    strategyDecision,
     stabilityMonitor,
     strategyMeta: { version: STRATEGY_VERSION, signature: strategySignature },
     bestSignal,

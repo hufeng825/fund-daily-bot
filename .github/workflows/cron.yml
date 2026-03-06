@@ -2,7 +2,7 @@ name: Fund Daily Strategy
 
 on:
   schedule:
-    - cron: "10 6 * * 1-5" # 14:10 Asia/Shanghai (UTC+8)
+    - cron: "40 5 * * 1-5" # 13:40 Asia/Shanghai (UTC+8),提前触发避免队列延迟
   workflow_dispatch:
 
 jobs:
@@ -15,6 +15,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "18"
+          cache: 'npm'
+      - name: Cache fund history
+        uses: actions/cache@v4
+        with:
+          path: cache
+          key: fund-cache-${{ runner.os }}-${{ hashFiles('config/funds.json') }}
+          restore-keys: |
+            fund-cache-${{ runner.os }}-
       - name: Install deps
         run: npm install
       - name: Run
@@ -25,4 +33,7 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           MAIL_FROM: ${{ secrets.MAIL_FROM }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
+          FAST_MODE: '1'
+          FUND_CONCURRENCY: '12'
+          HTTP_TIMEOUT_MS: '9000'
         run: npm run run
